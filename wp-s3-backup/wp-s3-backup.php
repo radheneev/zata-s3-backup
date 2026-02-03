@@ -9,6 +9,12 @@
 
 if (!defined('ABSPATH')) exit;
 
+// Plugin constants (used for paths/URLs and enqueues)
+define('ZATA_WPS3B_VERSION', '1.0.7');
+define('ZATA_WPS3B_PLUGIN_FILE', __FILE__);
+define('ZATA_WPS3B_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('ZATA_WPS3B_PLUGIN_URL', plugin_dir_url(__FILE__));
+
 define('ZATA_WPS3B_OPT', 'zata_wps3b_settings');
 define('ZATA_WPS3B_LOG', 'zata_wps3b_last_log');
 define('ZATA_WPS3B_TEST', 'zata_wps3b_test_status');
@@ -186,4 +192,4 @@ function zata_wps3b_send_notification($success, $log_text, $mode = 'manual') {
 /**
  * Load admin UI + logic
  */
-require_once __DIR__ . '/admin.php';
+require_once ZATA_WPS3B_PLUGIN_DIR . 'admin.php';

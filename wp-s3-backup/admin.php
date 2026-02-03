@@ -17,6 +17,34 @@ add_action('admin_menu', function () {
 });
 
 /* ---------------------------
+ * Admin assets (CSS/JS)
+ * --------------------------- */
+add_action('admin_enqueue_scripts', function ($hook_suffix) {
+    // Only load on this plugin's admin page.
+    if ($hook_suffix !== 'toplevel_page_zata-wps3b') {
+        return;
+    }
+
+    // These files are shipped with the plugin (no external assets).
+    wp_register_style(
+        'zata-wps3b-admin',
+        ZATA_WPS3B_PLUGIN_URL . 'assets/css/admin.css',
+        [],
+        defined('ZATA_WPS3B_VERSION') ? ZATA_WPS3B_VERSION : null
+    );
+    wp_enqueue_style('zata-wps3b-admin');
+
+    wp_register_script(
+        'zata-wps3b-admin',
+        ZATA_WPS3B_PLUGIN_URL . 'assets/js/admin.js',
+        [],
+        defined('ZATA_WPS3B_VERSION') ? ZATA_WPS3B_VERSION : null,
+        true
+    );
+    wp_enqueue_script('zata-wps3b-admin');
+});
+
+/* ---------------------------
  * Helpers: settings + logs + test status
  * --------------------------- */
 function zata_wps3b_get_settings() {
@@ -87,7 +115,9 @@ function zata_wps3b_run_backup($mode = 'manual') {
 
         if ($include_themes) {
             $themes_zip = $base_dir . "/{$site}-themes-{$ts}.zip";
-            zata_wps3b_zip_dir(WP_CONTENT_DIR . '/themes', $themes_zip);
+            // Themes location can vary; use core helper.
+            $themes_root = get_theme_root();
+            zata_wps3b_zip_dir($themes_root, $themes_zip);
             $files['themes'] = $themes_zip;
             zata_wps3b_append_log_line($lines, "✓ Themes ZIP created: {$themes_zip}");
         } else {
@@ -96,7 +126,10 @@ function zata_wps3b_run_backup($mode = 'manual') {
 
         if ($include_plugins) {
             $plugins_zip = $base_dir . "/{$site}-plugins-{$ts}.zip";
-            zata_wps3b_zip_dir(WP_CONTENT_DIR . '/plugins', $plugins_zip);
+            // Derive the plugins directory from this plugin's own location
+            // using plugin_dir_path() instead of the WP_PLUGIN_DIR constant.
+            $all_plugins_dir = dirname( plugin_dir_path( ZATA_WPS3B_PLUGIN_FILE ) );
+            zata_wps3b_zip_dir( $all_plugins_dir, $plugins_zip );
             $files['plugins'] = $plugins_zip;
             zata_wps3b_append_log_line($lines, "✓ Plugins ZIP created: {$plugins_zip}");
         } else {
@@ -375,6 +408,9 @@ function zata_wps3b_render_page() {
     $notice = null;
     $notice_type = 'success';
 
+    // Fetch current settings early so every branch below can read them.
+    $s = zata_wps3b_get_settings();
+
     // 1) Save settings
     if (isset($_POST['zata_wps3b_save']) && check_admin_referer('zata_wps3b_save', 'zata_wps3b_nonce')) {
         $new_settings = [
@@ -395,11 +431,12 @@ function zata_wps3b_render_page() {
             'keep_local'      => max(0, (int) sanitize_text_field(wp_unslash($_POST['keep_local'] ?? 3))),
             'last_backup'     => $s['last_backup'] ?? 0, // Preserve last backup time
             
-            // Notification settings - match form field names
+            // Notification settings
             'notify_enabled'    => isset($_POST['notify_enabled']) ? 1 : 0,
             'notify_email'      => sanitize_email(wp_unslash($_POST['notify_email'] ?? '')),
-            'notify_on_success' => isset($_POST['notify_on_success']) ? 1 : 0,
-            'notify_on_failure' => isset($_POST['notify_on_failure']) ? 1 : 0,
+            'notify_on'         => (isset($_POST['notify_on_success']) && isset($_POST['notify_on_failure'])) ? 'both'
+                                  : (isset($_POST['notify_on_success']) ? 'success'
+                                  : (isset($_POST['notify_on_failure']) ? 'failure' : 'both')),
         ];
 
         update_option(ZATA_WPS3B_OPT, $new_settings, false);
@@ -409,12 +446,10 @@ function zata_wps3b_render_page() {
         
         // Show notification status if enabled
         if ($new_settings['notify_enabled']) {
-            $notify_types = [];
-            if ($new_settings['notify_on_success']) $notify_types[] = 'Success';
-            if ($new_settings['notify_on_failure']) $notify_types[] = 'Failure';
-            if (!empty($notify_types)) {
-                $notice .= ' | Email notifications: ' . implode(' & ', $notify_types);
-            }
+            $notify_label = 'Success & Failure';
+            if ($new_settings['notify_on'] === 'success') $notify_label = 'Success';
+            if ($new_settings['notify_on'] === 'failure') $notify_label = 'Failure';
+            $notice .= ' | Email notifications: ' . $notify_label;
         }
         
         if ($new_settings['schedule'] === 'daily') {
@@ -477,39 +512,7 @@ function zata_wps3b_render_page() {
             </div>
         <?php endif; ?>
 
-        <style>
-            .zata-provider {display:none;}
-            .zata-tile {
-                display:flex;align-items:center;gap:12px;
-                padding:16px 20px;border:2px solid #ddd;border-radius:6px;
-                cursor:pointer;transition:all .2s;
-            }
-            .zata-tile:hover { border-color:#0073aa; }
-            .zata-provider:checked + .zata-tile {
-                border-color:#0073aa;background:#f0f8ff;
-            }
-            .zata-ico {font-size:28px;color:#0073aa;}
-            .zata-title {font-weight:600;font-size:15px;}
-            .zata-sub {font-size:13px;color:#666;}
-            .zata-layout {display:flex;gap:20px;margin-top:20px;flex-wrap:wrap;}
-            .zata-card {flex:1;min-width:460px;background:#fff;border:1px solid #ccd0d4;padding:20px;box-shadow:0 1px 1px rgba(0,0,0,.04);}
-            .zata-card h2 {margin-top:16px;margin-bottom:10px;font-size:16px;}
-            .zata-actions {display:flex;gap:10px;margin-top:14px;}
-            .zata-checks {display:flex;flex-direction:column;gap:8px;margin-bottom:16px;}
-            .zata-checks label {display:flex;align-items:center;gap:8px;}
-            .zata-hint {font-size:13px;color:#666;margin-top:4px;}
-            .zata-mono {
-                font-family:Consolas,Monaco,monospace;font-size:12px;
-                background:#f7f7f7;padding:12px;border:1px solid #ddd;
-                border-radius:4px;white-space:pre-wrap;max-height:400px;overflow-y:auto;
-            }
-            .zata-badge {
-                display:inline-block;padding:4px 10px;border-radius:4px;
-                font-size:13px;font-weight:600;background:#f0f0f0;color:#666;
-            }
-            .zata-badge.ok {background:#d4edda;color:#155724;}
-            .zata-badge.bad {background:#f8d7da;color:#721c24;}
-        </style>
+
 
         <form method="post" action="">
             <?php wp_nonce_field('zata_wps3b_save', 'zata_wps3b_nonce'); ?>
@@ -686,11 +689,11 @@ function zata_wps3b_render_page() {
                                 <td>
                                     <div style="display:flex;flex-direction:column;gap:8px;">
                                         <label>
-                                            <input type="checkbox" name="notify_on_success" <?php checked(!empty($s['notify_on_success']) || !isset($s['notify_on_success'])); ?>>
+                                            <input type="checkbox" name="notify_on_success" <?php checked( in_array( $s['notify_on'] ?? 'both', array( 'success', 'both' ) ) ); ?>>
                                             Backup succeeds ✓
                                         </label>
                                         <label>
-                                            <input type="checkbox" name="notify_on_failure" <?php checked(!empty($s['notify_on_failure']) || !isset($s['notify_on_failure'])); ?>>
+                                            <input type="checkbox" name="notify_on_failure" <?php checked( in_array( $s['notify_on'] ?? 'both', array( 'failure', 'both' ) ) ); ?>>
                                             Backup fails ✖
                                         </label>
                                     </div>
@@ -760,50 +763,7 @@ function zata_wps3b_render_page() {
         <h2>Logs</h2>
         <div class="zata-mono"><?php echo esc_html($log); ?></div>
 
-        <script>
-            (function(){
-                const zataRadio = document.getElementById('prov_zata');
-                const endpoint  = document.getElementById('zata_endpoint');
-                const protocol  = document.getElementById('zata_protocol');
-
-                function applyPreset(){
-                    if (zataRadio && zataRadio.checked){
-                        if (!endpoint.value) endpoint.value = 'idr01.zata.ai';
-                        if (!protocol.value) protocol.value = 'https';
-                    }
-                }
-                if (zataRadio) zataRadio.addEventListener('change', applyPreset);
-                applyPreset();
-
-                // Show/hide backup time based on schedule selection
-                const scheduleSelect = document.getElementById('backup_schedule');
-                const timeRow = document.getElementById('backup_time_row');
-                
-                if (scheduleSelect && timeRow) {
-                    scheduleSelect.addEventListener('change', function() {
-                        if (this.value === 'daily') {
-                            timeRow.style.display = '';
-                        } else {
-                            timeRow.style.display = 'none';
-                        }
-                    });
-                }
-
-                // Show/hide notification settings based on checkbox
-                const notifyCheckbox = document.getElementById('notify_enabled');
-                const notifySettings = document.getElementById('notification_settings');
-                
-                if (notifyCheckbox && notifySettings) {
-                    notifyCheckbox.addEventListener('change', function() {
-                        if (this.checked) {
-                            notifySettings.style.display = '';
-                        } else {
-                            notifySettings.style.display = 'none';
-                        }
-                    });
-                }
-            })();
-        </script>
+        <!-- JS is enqueued via admin_enqueue_scripts -->
     </div>
     <?php
 }
